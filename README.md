@@ -2,6 +2,8 @@
 
 A robot that finds a plant pot on its own, drives up to it, checks if the soil is dry, and stops when it gets there. It runs on three microcontrollers talking to each other over WiFi. An ESP32-CAM spots the pot, a main ESP32 handles navigation and hosts a web dashboard, and a small ESP-01S just reads soil moisture.
 
+<img width="1920" height="1080" alt="ESP32 - CAM" src="https://github.com/user-attachments/assets/6080a9ba-1da1-40f2-b860-97cb1a73b71d" />
+
 ---
 
 ## How it works
