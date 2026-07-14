@@ -1,66 +1,62 @@
----
-
 # Autonomous Plant-Watering Robot
 
-Built an autonomous multi-microcontroller robot that locates a plant pot using computer vision, navigates to it, checks soil moisture, and stops on arrival. Full system: ESP32-CAM for red-object detection via RGB565 frame analysis, a main ESP32 running a 4-state navigation state machine (SEARCH, FOLLOWING, WALL_AVOID, ARRIVED) with FreeRTOS dual-core task separation, and an ESP-01S module for soil sensing — all communicating over local WiFi via mDNS.
+A robot that finds a plant pot on its own, drives up to it, checks if the soil is dry, and stops when it gets there. It runs on three microcontrollers talking to each other over WiFi. An ESP32-CAM spots the pot, a main ESP32 handles navigation and hosts a web dashboard, and a small ESP-01S just reads soil moisture.
 
 ---
 
 ## How it works
 
-The system consists of three separate microcontrollers that communicate over WiFi on a shared local network. The main ESP32 acts as the brain — it runs a web server, receives data from the other two modules, and controls the robot's movement. All devices connect via mDNS, so the robot is always reachable at `http://wateringrobot.local` without hardcoded IP addresses.
+The three boards talk to each other over WiFi on the same local network. The main ESP32 is basically the brain. It runs the web server, pulls in data from the other two boards, and decides how the robot moves. Everything connects through mDNS, so you can always reach the robot at `http://wateringrobot.local` without needing to look up its IP.
 
 ---
 
 ## Modules
 
-### 1. Main ESP32 — Robot controller
+### 1. Main ESP32: Robot controller
 
-The central unit. Runs the navigation logic on core 1 while a dedicated FreeRTOS task on core 0 continuously polls the camera module for target angle data every 150 ms.
+This is the central unit. Navigation runs on core 1, while a separate FreeRTOS task on core 0 keeps polling the camera module for the target angle every 150 ms.
 
-The robot operates as a state machine with four states:
+The robot works as a simple state machine with four states:
 
 | State | Behaviour |
 |---|---|
-| `SEARCH` | Spins left or right in short bursts, pausing between turns to wait for a camera response |
-| `FOLLOWING` | Drives toward the detected pot using proportional steering — the further the target is from centre, the more the inner wheel is boosted |
-| `WALL_AVOID` | Backs up for 500 ms, then turns right for 550 ms when an obstacle is detected that is not the target pot |
-| `ARRIVED` | Stops and fine-tunes alignment using short 150 ms spin pulses until the pot is centred in frame |
+| `SEARCH` | Spins left or right in short bursts, pausing between turns to see if the camera has spotted anything |
+| `FOLLOWING` | Drives toward the pot using proportional steering. The further off-centre the target is, the harder the inner wheel gets pushed |
+| `WALL_AVOID` | Backs up for 500 ms, then turns right for 550 ms if it hits something that isn't the pot |
+| `ARRIVED` | Stops and nudges itself into alignment with short 150 ms spin pulses until the pot is centred in frame |
 
-Wall detection uses an HC-SR04 ultrasonic sensor mounted at the front. If an object appears within 18 cm, the robot checks whether the camera has seen the pot recently (within the last 5 seconds). If yes — it has arrived at the destination and switches to `STATE_ARRIVED`. If no — it treats it as an obstacle and executes the avoidance manoeuvre.
+Obstacle detection runs off an HC-SR04 ultrasonic sensor at the front. If something shows up within 18 cm, the robot checks whether the camera has seen the pot in the last 5 seconds. If it has, that "something" is the pot, so the robot switches to `ARRIVED`. If not, it treats it as a wall and backs off.
 
-A live dashboard is served at the root URL, auto-refreshing every second and showing current state, distance, camera angle, soil moisture, and whether the pot was seen recently.
+There's also a live dashboard on the root URL that refreshes every second, showing the current state, distance, camera angle, soil moisture, and whether the pot was recently seen.
 
 ---
 
-### 2. ESP32-CAM — Visual target detection
+### 2. ESP32-CAM: Visual target detection
 
-An AI Thinker ESP32-CAM module running a colour detection algorithm. It captures frames at QQVGA resolution (160×120) in RGB565 format and scans every 4th pixel for red objects.
+An AI Thinker ESP32-CAM running a simple colour detection algorithm. It grabs frames at QQVGA (160x120) in RGB565 and checks every 4th pixel for red.
 
-A pixel is classified as red if its red channel value exceeds 12 and is greater than both green and blue channels. When more than 6 red pixels are found in a frame, the module calculates the horizontal centre of mass of all red pixels and converts it to an angle relative to the camera's field of view (65° by default):
+A pixel counts as red if its red channel is above 12 and higher than both green and blue. Once more than 6 red pixels show up in a frame, it works out the horizontal centre of mass of those pixels and turns that into an angle based on the camera's field of view (65° by default):
 
 ```
 angle = (centerX - 80) × (FOV/2) / 80
 ```
 
-This angle — negative for left, positive for right, `404` for not found — is sent to the main ESP32 via HTTP GET every 200 ms. The main robot uses this value both for steering while following and for confirming arrival when the ultrasonic sensor detects a close object.
-
+That angle (negative for left, positive for right, or 404 if nothing's found) gets sent to the main ESP32 over HTTP every 200 ms. The main board uses it both to steer while following and to confirm arrival when the ultrasonic sensor picks something up.
 
 https://github.com/user-attachments/assets/d0a08f9c-38ac-41e1-830b-2962d2f2c1c2
 
-
 ---
 
-### 3. ESP-01S — Soil moisture sensor
+### 3. ESP-01S: Soil moisture sensor
 
-A minimal ESP8266-based module that reads a digital soil moisture sensor on GPIO2 every 10 seconds and sends the result to the main ESP32 via HTTP GET:
+A stripped-down ESP8266 board that checks a digital soil moisture sensor on GPIO2 every 10 seconds and reports back to the main ESP32:
 
 ```
 http://wateringrobot.local/soil?status=1   // dry
 http://wateringrobot.local/soil?status=0   // wet
 ```
 
-`HIGH` on the pin means dry, `LOW` means wet. The result is displayed on the robot's web dashboard and can be used to confirm whether watering is needed upon arrival.
+HIGH means dry, LOW means wet. Shows up on the dashboard and can be used to decide whether the plant actually needs watering once the robot arrives.
 
 ---
 
@@ -91,7 +87,7 @@ http://wateringrobot.local/soil?status=0   // wet
 | ESP-01S | Soil moisture sensing |
 | HC-SR04 | Obstacle and arrival detection |
 | L298N | Dual H-bridge motor driver |
-| 4× DC gear motors | Drive |
+| 4x DC gear motors | Drive |
 | Capacitive soil moisture sensor | Plant soil reading |
 
 ---
@@ -99,7 +95,7 @@ http://wateringrobot.local/soil?status=0   // wet
 ## Tech stack
 
 - Arduino framework (ESP32 + ESP8266 core)
-- FreeRTOS — dual-core task pinning on ESP32
-- mDNS — zero-config device discovery on local network
-- HTTP — inter-device communication
-- RGB565 frame processing — on-device computer vision without any external library
+- FreeRTOS for dual-core task pinning on the ESP32
+- mDNS for zero-config device discovery on the local network
+- HTTP for communication between boards
+- RGB565 frame processing, computer vision done on-device with no external libraries
